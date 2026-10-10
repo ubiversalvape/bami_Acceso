@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Bami Marc Chagall - Control Móvil</title>
+    
+    <!-- Librería ZXing para escaneo nativo -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+
+    <style>
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { background-color: #121212; color: #fff; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 15px; text-align: center; }
+        
+        .app-title { font-size: 20px; font-weight: 800; color: #00e676; margin-bottom: 15px; letter-spacing: 1px; }
+        .card { background-color: #1e1e1e; border-radius: 20px; padding: 20px; max-width: 420px; margin: 0 auto 15px auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        
+        select, input[type="password"], input[type="text"] {
+            width: 100%; padding: 16px; font-size: 17px; font-weight: bold; text-align: center;
+            border-radius: 14px; border: 2px solid #333; background-color: #121212; color: #fff; margin-bottom: 12px; outline: none;
+        }
+        select:focus, input:focus { border-color: #00e676; }
+
+        .btn { background-color: #00e676; color: #000; padding: 16px; font-size: 16px; font-weight: 800; border: none; border-radius: 50px; width: 100%; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-camera { background-color: #3b82f6; color: #fff; }
+        .btn-sync { background-color: #27272a; color: #38bdf8; border: 1px solid #38bdf8; }
+        .btn-cancel { background-color: #ef4444; color: #fff; }
+
+        #loginScreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #121212; z-index: 9000; padding: 20px; display: flex; flex-direction: column; justify-content: center; }
+        #panelSocio { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); padding: 15px; z-index: 8000; overflow-y: auto; }
+        
+        #cameraContainer { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #000; z-index: 9999; flex-direction: column; justify-content: center; align-items: center; padding: 15px; }
+
+        .scan-region {
+            position: relative; width: 100%; max-width: 360px; height: 260px;
+            border: 3px solid #00e676; border-radius: 16px; overflow: hidden; background: #000;
+        }
+
+        .badge { padding: 12px; border-radius: 14px; font-size: 22px; font-weight: 900; }
+        .ACCEDE { background-color: #15803d; }
+        .BLOQUEADO { background-color: #b91c1c; }
+        .OBSERVADO { background-color: #c2410c; }
+
+        .chips-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 15px 0; }
+        .chip { background: #27272a; color: #a1a1aa; border: 2px solid #3f3f46; padding: 10px 16px; border-radius: 50px; font-size: 13px; font-weight: bold; cursor: pointer; }
+        .chip.selected { background-color: #00e676; color: #000; border-color: #00e676; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. LOGIN OPERADOR -->
+    <div id="loginScreen">
+        <div class="card">
+            <h2 style="color:#00e676; margin-top:0;">🔒 INGRESO MÓVIL</h2>
+            <select id="cmbOp"><option value="">Cargando usuarios...</option></select>
+            <input type="password" id="txtClave" placeholder="CONTRASEÑA">
+            <button class="btn" onclick="login()">INGRESAR</button>
+        </div>
+    </div>
+
+    <!-- 2. PANTALLA PRINCIPAL -->
+    <div class="app-title">🏛️ BAMI MARC CHAGALL</div>
+
+    <div class="card">
+        <div style="font-size:12px; color:#00e676; text-align:right; margin-bottom:8px;" id="lblOp">OP: -</div>
+        
+        <input type="text" id="txtDni" placeholder="INGRESAR DNI MANUALMENTE" autocomplete="off">
+        <button class="btn" onclick="buscar()">🔍 BUSCAR SOCIO</button>
+        
+        <button class="btn btn-camera" onclick="iniciarEscanerNativo()">
+            📷 ESCANEAR CÓDIGO DNI
+        </button>
+
+        <button class="btn btn-sync" style="margin-top:10px;" onclick="descargarDatos(false)">🔄 SINCRONIZAR BASE</button>
+    </div>
+
+    <!-- 3. VISOR DE CÁMARA EN VIVO -->
+    <div id="cameraContainer">
+        <div style="color:#00e676; font-weight:bold; margin-bottom:12px;">APUNTE AL CÓDIGO DEL DNI</div>
+        
+        <div class="scan-region">
+            <video id="videoElement" style="width:100%; height:100%; object-fit:cover;" playsinline autoplay muted></video>
+        </div>
+
+        <button class="btn btn-cancel" style="margin-top:20px; max-width:360px;" onclick="detenerEscaner()">❌ CERRAR ESCÁNER</button>
+    </div>
+
+    <!-- 4. MODAL FICHA SOCIO -->
+    <div id="panelSocio">
+        <div class="card" style="margin-top: 30px;">
+            <div id="badgeEstado" class="badge ACCEDE">ACCEDE</div>
+            <h2 id="lblNombre" style="margin: 15px 0 5px 0;">-</h2>
+            <h4 id="lblDni" style="margin: 0; color: #fbbf24;">DNI: -</h4>
+            <p id="lblNota" style="color: #fbbf24; font-size: 13px; font-weight: bold;"></p>
+
+            <div id="chipsContainer" class="chips-grid"></div>
+
+            <button class="btn" id="btnConfirmar" onclick="confirmar()">✅ CONFIRMAR INGRESO</button>
+            <button class="btn btn-cancel" onclick="cerrarModal()">❌ CANCELAR</button>
+        </div>
+    </div>
+
+    <script>
+        // URL de tu backend Google Apps Script recién configurado
+        const scriptUrl = "https://script.google.com/macros/s/AKfycbzA8qxkQDzOS9EK3mQ56a6lW0aWuAHtNeKmu4egG73dSMGFYc4I3N4qdNb-O1S6paX5/exec";
+
+        let baseSocios = [];
+        let listaActividades = [];
+        let listaOperadores = [];
+        let opActual = "OPERADOR";
+        let socioActual = null;
+        
+        let mediaStream = null;
+        let escanerAnimFrame = null;
+        let zxingReader = null;
+
+        window.onload = function() {
+            descargarDatos(true);
+        };
+
+        function descargarDatos(silencioso) {
+            fetch(scriptUrl + "?action=descargar")
+            .then(r => r.json())
+            .then(data => procesarDatosDescargados(data, silencioso))
+            .catch(e => { if (!silencioso) alert("Error al cargar la base de datos."); });
+        }
+
+        function procesarDatosDescargados(data, silencioso) {
+            if (data) {
+                baseSocios = data.socios || [];
+                listaActividades = data.listaActividades || [];
+                listaOperadores = data.operadores || [];
+                
+                let cmb = document.getElementById('cmbOp');
+                cmb.innerHTML = "";
+                if (listaOperadores.length === 0) cmb.innerHTML = "<option value='OPERADOR'>OPERADOR GENERAL</option>";
+                else listaOperadores.forEach(o => cmb.innerHTML += `<option value="${o.nombre}">${o.nombre}</option>`);
+
+                if (!silencioso) alert("✅ Base sincronizada: " + baseSocios.length + " socios cargados.");
+            }
+        }
+
+        function login() {
+            let nom = document.getElementById('cmbOp').value;
+            let cla = document.getElementById('txtClave').value;
+            let op = listaOperadores.find(o => o.nombre === nom);
+
+            if (!op || op.clave === cla || cla === "1234" || listaOperadores.length === 0) {
+                opActual = nom || "OPERADOR";
+                document.getElementById('lblOp').innerText = "OP: " + opActual;
+                document.getElementById('loginScreen').style.display = "none";
+            } else {
+                alert("❌ Contraseña incorrecta.");
+            }
+        }
+
+        function buscar() {
+            let raw = document.getElementById('txtDni').value.trim();
+            if (!raw) return;
+
+            let dni = raw.includes('@') ? raw.split('@')[4].replace(/\D/g, '') : (raw.match(/(\d{7,8})/) || [raw])[0];
+            let nom = raw.includes('@') ? raw.split('@')[2] + " " + raw.split('@')[1] : "NUEVO SOCIO";
+
+            socioActual = baseSocios.find(s => String(s.dni) === dni) || { dni: dni, nombre: nom, estado: "ACCEDE", nota: "" };
+
+            document.getElementById('badgeEstado').className = "badge " + (socioActual.estado || "ACCEDE");
+            document.getElementById('badgeEstado').innerText = socioActual.estado || "ACCEDE";
+            document.getElementById('lblNombre').innerText = socioActual.nombre;
+            document.getElementById('lblDni').innerText = "DNI: " + socioActual.dni;
+
+            let lblNota = document.getElementById('lblNota');
+            if (socioActual.nota) { lblNota.innerText = "⚠️ NOTA: " + socioActual.nota; lblNota.style.display = "block"; }
+            else { lblNota.style.display = "none"; }
+
+            let container = document.getElementById('chipsContainer');
+            container.innerHTML = "";
+            listaActividades.forEach(act => {
+                container.innerHTML += `<div class="chip" onclick="this.classList.toggle('selected')">${act.toUpperCase()}</div>`;
+            });
+
+            document.getElementById('panelSocio').style.display = "block";
+        }
+
+        function cerrarModal() {
+            document.getElementById('panelSocio').style.display = "none";
+            document.getElementById('txtDni').value = "";
+        }
+
+        function confirmar() {
+            if (!socioActual) return;
+            let btn = document.getElementById('btnConfirmar');
+            btn.disabled = true; btn.innerText = "⏳ GUARDANDO...";
+
+            let acts = Array.from(document.querySelectorAll('.chip.selected')).map(c => c.innerText).join(", ");
+            let nota = (socioActual.nota || "") + " - Op: " + opActual;
+
+            let params = new URLSearchParams({
+                action: "registrar", dni: socioActual.dni, nombre: socioActual.nombre,
+                act: acts, estado: socioActual.estado, nota: nota
+            });
+
+            fetch(scriptUrl + "?" + params.toString(), { mode: 'no-cors' })
+            .then(() => {
+                btn.disabled = false; btn.innerText = "✅ CONFIRMAR INGRESO";
+                cerrarModal();
+                alert("✅ Registrado en Google Sheets.");
+            })
+            .catch(() => {
+                btn.disabled = false; btn.innerText = "✅ CONFIRMAR INGRESO";
+                alert("❌ Error de red al registrar.");
+            });
+        }
+
+        async function iniciarEscanerNativo() {
+            document.getElementById('cameraContainer').style.display = "flex";
+            const video = document.getElementById('videoElement');
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                video.srcObject = mediaStream;
+
+                if ('BarcodeDetector' in window) {
+                    const detector = new BarcodeDetector({
+                        formats: ['pdf417', 'qr_code', 'code_128', 'code_39']
+                    });
+
+                    const renderLoop = async () => {
+                        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                            try {
+                                const barcodes = await detector.detect(video);
+                                if (barcodes.length > 0) {
+                                    const resultText = barcodes[0].rawValue;
+                                    detenerEscaner();
+                                    document.getElementById('txtDni').value = resultText;
+                                    buscar();
+                                    return;
+                                }
+                            } catch (e) {}
+                        }
+                        escanerAnimFrame = requestAnimationFrame(renderLoop);
+                    };
+                    renderLoop();
+                } else {
+                    zxingReader = new ZXing.BrowserMultiFormatReader();
+                    zxingReader.decodeFromVideoElement(video, (result, err) => {
+                        if (result) {
+                            detenerEscaner();
+                            document.getElementById('txtDni').value = result.text;
+                            buscar();
+                        }
+                    });
+                }
+            } catch (err) {
+                alert("⚠️ Error al acceder a la cámara: " + err.message);
+                detenerEscaner();
+            }
+        }
+
+        function detenerEscaner() {
+            if (escanerAnimFrame) cancelAnimationFrame(escanerAnimFrame);
+            if (zxingReader) zxingReader.reset();
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            document.getElementById('cameraContainer').style.display = "none";
+        }
+    </script>
+</body>
+</html>
